@@ -4,6 +4,8 @@ use std::{
     time::Duration,
 };
 
+use rand;
+
 use crossterm::{
     cursor,
     event::{self, Event, KeyCode, MouseButton, MouseEventKind},
@@ -24,31 +26,23 @@ const SUBSCRIPTS: [char; 10] = ['₀', '₁', '₂', '₃', '₄', '₅', '₆',
 const SUPERSCRIPTS: [char; 10] = ['⁰', '¹', '²', '³', '⁴', '⁵', '⁶', '⁷', '⁸', '⁹'];
 
 fn to_superscript(n: u8) -> String {
-    let str: String = n
-        .to_string()
-        .chars()
-        .map(|c| SUPERSCRIPTS[c.to_digit(10).unwrap() as usize])
-        .collect();
-
-    if str.len() == 3 {
-        format!(" {}", str)
-    } else {
-        str
-    }
+    format!(
+        "{: >2}",
+        n.to_string()
+            .chars()
+            .map(|c| SUPERSCRIPTS[c.to_digit(10).unwrap() as usize])
+            .collect::<String>(),
+    )
 }
 
 fn to_subscript(n: u8) -> String {
-    let str: String = n
-        .to_string()
-        .chars()
-        .map(|c| SUBSCRIPTS[c.to_digit(10).unwrap() as usize])
-        .collect();
-
-    if str.len() == 3 {
-        format!(" {}", str)
-    } else {
-        str
-    }
+    format!(
+        "{: >2}",
+        n.to_string()
+            .chars()
+            .map(|c| SUBSCRIPTS[c.to_digit(10).unwrap() as usize])
+            .collect::<String>()
+    )
 }
 
 fn main() -> io::Result<()> {
@@ -62,13 +56,22 @@ fn main() -> io::Result<()> {
         cursor::Hide
     )?;
 
-    const PIXEL: Pixel = Pixel {
+    let palette = [Color::Red, Color::Green, Color::Blue];
+
+    let mut board = [[Pixel {
         color: 0,
         filled: false,
-    };
-    let mut board = [[PIXEL; 1000]; 1000];
-
-    let palette = [Color::Red, Color::Green, Color::Blue];
+    }; 1000]; 1000];
+    // randomize board
+    for row in 0..board.len() {
+        for col in 0..board[row].len() {
+            let random_color = rand::random::<u8>() % 3;
+            board[row][col] = Pixel {
+                color: random_color,
+                filled: false,
+            };
+        }
+    }
 
     let mut current_color: u8 = 0;
 
@@ -89,10 +92,11 @@ fn main() -> io::Result<()> {
                 Event::Mouse(event) => match event.kind {
                     MouseEventKind::Drag(MouseButton::Left)
                     | MouseEventKind::Down(MouseButton::Left) => {
-                        board[event.row as usize][(event.column - event.column % 2) as usize]
-                            .filled = true;
-                        board[event.row as usize][(event.column - event.column % 2) as usize]
-                            .color = current_color;
+                        let pixel = &mut board[event.row as usize]
+                            [(event.column - event.column % 2) as usize];
+                        if pixel.color == current_color {
+                            pixel.filled = true;
+                        }
                     }
                     MouseEventKind::Down(MouseButton::Right) => {
                         current_color = (current_color + 1) % (palette.len() as u8);
@@ -121,9 +125,9 @@ fn main() -> io::Result<()> {
                     )?;
                 } else {
                     if (col / 2) % 2 == 1 {
-                        queue!(stdout, style::Print(to_subscript(pixel.color)))?;
+                        queue!(stdout, style::Print(to_subscript(pixel.color + 1)))?;
                     } else {
-                        queue!(stdout, style::Print(to_superscript(pixel.color)))?;
+                        queue!(stdout, style::Print(to_superscript(pixel.color + 1)))?;
                     }
                 }
             }
