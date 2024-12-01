@@ -22,6 +22,89 @@ struct Pixel {
     filled: bool,
 }
 
+struct Board {
+    x: i16,
+    y: i16,
+
+    pixels: [[Pixel; 10]; 10],
+    palette: [Color; 3],
+}
+
+impl Board {
+    fn new() -> Self {
+        Self {
+            x: 0,
+            y: 0,
+
+            pixels: [[Pixel {
+                color: 0,
+                filled: false,
+            }; 10]; 10],
+            palette: [Color::Red, Color::Green, Color::Blue],
+        }
+    }
+
+    fn width(&self) -> u16 {
+        self.pixels[0].len() as u16
+    }
+
+    fn height(&self) -> u16 {
+        self.pixels.len() as u16
+    }
+
+    fn get(&self, px: u16, py: u16) -> Pixel {
+        self.pixels[py as usize][px as usize]
+    }
+
+    fn get_mut(&mut self, px: u16, py: u16) -> &mut Pixel {
+        &mut self.pixels[py as usize][px as usize]
+    }
+
+    fn set(&mut self, px: u16, py: u16, pixel: Pixel) {
+        self.pixels[py as usize][px as usize] = pixel;
+    }
+
+    fn contains(&self, px: i16, py: i16) -> bool {
+        px >= 0 && px < self.width() as i16 && py >= 0 && py < self.height() as i16
+    }
+
+    fn render(&self) -> io::Result<()> {
+        let mut stdout = io::stdout();
+        let size = terminal::size()?;
+
+        for px in 0..self.width() {
+            for py in 0..self.height() {
+                let cx = self.x + 2 * px as i16;
+                let cy = self.y + py as i16;
+
+                if cx < 0 || cx + 1 >= size.0 as i16 || cy < 0 || cy >= size.1 as i16 {
+                    continue;
+                }
+
+                queue!(stdout, cursor::MoveTo(cx as u16, cy as u16))?;
+
+                let pixel = self.get(px, py);
+                if pixel.filled {
+                    queue!(
+                        stdout,
+                        style::SetBackgroundColor(self.palette[pixel.color as usize]),
+                        style::Print("  "),
+                        style::ResetColor
+                    )?;
+                } else {
+                    if px % 2 == 1 {
+                        queue!(stdout, style::Print(to_subscript(pixel.color + 1)))?;
+                    } else {
+                        queue!(stdout, style::Print(to_superscript(pixel.color + 1)))?;
+                    }
+                }
+            }
+        }
+
+        Ok(())
+    }
+}
+
 const SUBSCRIPTS: [char; 10] = ['₀', '₁', '₂', '₃', '₄', '₅', '₆', '₇', '₈', '₉'];
 const SUPERSCRIPTS: [char; 10] = ['⁰', '¹', '²', '³', '⁴', '⁵', '⁶', '⁷', '⁸', '⁹'];
 
@@ -56,24 +139,25 @@ fn main() -> io::Result<()> {
         cursor::Hide
     )?;
 
-    let palette = [Color::Red, Color::Green, Color::Blue];
+    let mut board = Board::new();
 
-    let mut board = [[Pixel {
-        color: 0,
-        filled: false,
-    }; 1000]; 1000];
     // randomize board
-    for row in 0..board.len() {
-        for col in 0..board[row].len() {
+    for row in 0..board.height() {
+        for col in 0..board.width() {
             let random_color = rand::random::<u8>() % 3;
-            board[row][col] = Pixel {
-                color: random_color,
-                filled: false,
-            };
+            board.set(
+                col,
+                row,
+                Pixel {
+                    color: random_color,
+                    filled: false,
+                },
+            );
         }
     }
 
     let mut current_color: u8 = 0;
+    let mut drag_start = (0, 0);
 
     let mut quit = false;
     while !quit {
@@ -92,14 +176,28 @@ fn main() -> io::Result<()> {
                 Event::Mouse(event) => match event.kind {
                     MouseEventKind::Drag(MouseButton::Left)
                     | MouseEventKind::Down(MouseButton::Left) => {
-                        let pixel = &mut board[event.row as usize]
-                            [(event.column - event.column % 2) as usize];
+                        let px = (event.column as i16 - board.x) / 2;
+                        let py = event.row as i16 - board.y;
+
+                        if !board.contains(px, py) {
+                            continue;
+                        }
+
+                        let pixel = board.get_mut(px as u16, py as u16);
                         if pixel.color == current_color {
                             pixel.filled = true;
                         }
                     }
                     MouseEventKind::Down(MouseButton::Right) => {
-                        current_color = (current_color + 1) % (palette.len() as u8);
+                        current_color = (current_color + 1) % (board.palette.len() as u8);
+                    }
+                    MouseEventKind::Down(MouseButton::Middle) => {
+                        drag_start = (event.column, event.row);
+                    }
+                    MouseEventKind::Drag(MouseButton::Middle) => {
+                        board.x += event.column as i16 - drag_start.0 as i16;
+                        board.y += event.row as i16 - drag_start.1 as i16;
+                        drag_start = (event.column, event.row);
                     }
                     _ => {}
                 },
@@ -108,30 +206,23 @@ fn main() -> io::Result<()> {
         }
 
         // render
-        queue!(stdout, terminal::Clear(ClearType::All))?;
+        queue!(
+            stdout,
+            terminal::BeginSynchronizedUpdate,
+            terminal::Clear(ClearType::All)
+        )?;
 
-        let size = terminal::size()?;
-        for row in 0..size.1 {
-            for col in (0..size.0).step_by(2) {
-                let pixel = board[row as usize][col as usize];
-                queue!(stdout, cursor::MoveTo(col, row))?;
-                if pixel.filled {
-                    let color = palette[pixel.color as usize];
-                    queue!(
-                        stdout,
-                        style::SetBackgroundColor(color),
-                        style::Print("  "),
-                        style::ResetColor
-                    )?;
-                } else {
-                    if (col / 2) % 2 == 1 {
-                        queue!(stdout, style::Print(to_subscript(pixel.color + 1)))?;
-                    } else {
-                        queue!(stdout, style::Print(to_superscript(pixel.color + 1)))?;
-                    }
-                }
-            }
-        }
+        board.render()?;
+
+        queue!(
+            stdout,
+            cursor::MoveTo(0, 0),
+            style::Print(format!(
+                "::: bx: {}, by: {} ::: c: {} :::",
+                board.x, board.y, current_color
+            )),
+            terminal::EndSynchronizedUpdate
+        )?;
 
         stdout.flush()?;
 
