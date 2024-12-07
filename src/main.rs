@@ -15,6 +15,8 @@ use crossterm::{
 };
 
 const FPS: u64 = 60;
+const BOARD_WIDTH: usize = 10;
+const BOARD_HEIGHT: usize = 10;
 
 #[derive(Clone, Copy)]
 struct Pixel {
@@ -44,6 +46,116 @@ impl RGB {
             b: self.b,
         }
     }
+}
+
+// TODO: allow to render outside of the screen
+fn render_filled_board_cell(x: u16, y: u16, color: Color) -> io::Result<()> {
+    let mut stdout = io::stdout();
+
+    queue!(
+        stdout,
+        cursor::MoveTo(x, y),
+        style::SetBackgroundColor(color),
+        style::Print("      "),
+        cursor::MoveTo(x, y + 1),
+        style::Print("      "),
+        cursor::MoveTo(x, y + 2),
+        style::Print("      "),
+        style::ResetColor
+    )?;
+
+    Ok(())
+}
+
+fn render_board_cell(x: u16, y: u16, number: u8, first_col: bool) -> io::Result<()> {
+    render_cell(
+        x,
+        y,
+        Color::Rgb {
+            r: 143,
+            g: 149,
+            b: 170,
+        },
+        Color::White,
+        None,
+        number,
+        first_col,
+    )
+}
+
+fn render_cell(
+    x: u16,
+    y: u16,
+    zero_foreground_color: Color,
+    foreground_color: Color,
+    background_color: Option<Color>,
+    number: u8,
+    first_col: bool,
+) -> io::Result<()> {
+    const BORDER_COLOR: Color = Color::Black;
+    let mut stdout = io::stdout();
+
+    if first_col && x > 0 {
+        queue!(
+            stdout,
+            cursor::MoveTo(x - 1, y),
+            style::SetForegroundColor(BORDER_COLOR),
+            style::Print("▕"),
+            cursor::MoveTo(x - 1, y + 1),
+            style::Print("▕"),
+            cursor::MoveTo(x - 1, y + 2),
+            style::Print("▕"),
+        )?;
+    }
+
+    if let Some(background_color) = background_color {
+        queue!(stdout, style::SetBackgroundColor(background_color))?;
+    }
+
+    queue!(
+        stdout,
+        cursor::MoveTo(x, y),
+        style::SetForegroundColor(BORDER_COLOR),
+        style::Print("🭽▔▔▔▔🭾"),
+        cursor::MoveTo(x, y + 1),
+        style::Print("▏ "),
+    )?;
+
+    if number < 9 {
+        queue!(
+            stdout,
+            style::SetForegroundColor(zero_foreground_color),
+            style::Print("0"),
+            style::SetForegroundColor(foreground_color),
+            style::Print(format!("{}", number + 1)),
+        )?;
+    } else {
+        queue!(
+            stdout,
+            style::SetForegroundColor(foreground_color),
+            style::Print(format!("{}", number + 1)),
+        )?;
+    }
+
+    queue!(
+        stdout,
+        style::SetForegroundColor(BORDER_COLOR),
+        style::Print(" ▕"),
+        cursor::MoveTo(x, y + 2),
+        style::Print("🭼▁▁▁▁🭿"),
+        style::ResetColor,
+        //
+        style::SetForegroundColor(BORDER_COLOR),
+        cursor::MoveTo(x + 6, y),
+        style::Print("▏"),
+        cursor::MoveTo(x + 6, y + 1),
+        style::Print("▏"),
+        cursor::MoveTo(x + 6, y + 2),
+        style::Print("▏"),
+        style::ResetColor,
+    )?;
+
+    Ok(())
 }
 
 impl Palette {
@@ -91,69 +203,99 @@ impl Palette {
             let brightness =
                 (0.299 * color.r as f32 + 0.587 * color.g as f32 + 0.114 * color.b as f32) / 255.0;
 
-            let mut stdout = io::stdout();
-
-            queue!(
-                stdout,
-                style::SetForegroundColor(Color::Black),
-                style::SetBackgroundColor(color.to_color()),
-                cursor::MoveTo(x, y),
-                style::Print("█🬂🬂🬂🬂🬂🬂█"),
-                cursor::MoveTo(x, y + 1),
-                style::Print("█      █"),
-                cursor::MoveTo(x, y + 2),
-                style::Print("█🬭🬭🬭🬭🬭🬭█"),
-                style::ResetColor
-            )?;
-
-            queue!(
-                stdout,
-                cursor::MoveTo(x + 3, y + 1),
-                style::SetBackgroundColor(color.to_color()),
-                style::SetForegroundColor(if brightness > 0.5 {
-                    Color::Black
-                } else {
-                    Color::White
-                }),
-                style::Print(format!("{: >2}", color_index + 1)),
-                style::ResetColor,
-            )?;
+            if brightness > 0.5 {
+                render_cell(
+                    x,
+                    y,
+                    RGB::new(25, 25, 25).to_color(),
+                    RGB::new(0, 0, 0).to_color(),
+                    Some(color.to_color()),
+                    color_index,
+                    false,
+                )?;
+            } else {
+                render_cell(
+                    x,
+                    y,
+                    RGB::new(229, 229, 229).to_color(),
+                    RGB::new(255, 255, 255).to_color(),
+                    Some(color.to_color()),
+                    color_index,
+                    false,
+                )?;
+            }
 
             Ok(())
         };
 
-        const CELL_WIDTH: u16 = 8;
+        const CELL_WIDTH: u16 = 6;
         const CELL_HEIGHT: u16 = 3;
-        const CELLS_PER_ROW: u8 = 5;
-        const CELLS_PER_COL: u8 = 2;
+        const CELLS_PER_ROW: u16 = 5;
+        const CELLS_PER_COL: u16 = 2;
         const TOTAL_WIDTH: u16 = CELL_WIDTH * CELLS_PER_ROW as u16;
 
         let x = (size.0 - TOTAL_WIDTH) / 2;
-        let y = size.1 - 2 * CELL_HEIGHT - 2;
+        let y = size.1 - 2 * CELL_HEIGHT - 1;
 
-        queue!(
-            stdout,
-            cursor::MoveTo(x, y),
-            style::SetForegroundColor(Color::Black),
-            style::Print("🬭".repeat(TOTAL_WIDTH as usize))
-        )?;
+        for oy in 1..(CELLS_PER_ROW * CELL_HEIGHT) {
+            queue!(
+                stdout,
+                cursor::MoveTo(x - 1, y + oy),
+                style::SetForegroundColor(Color::Black),
+                style::Print("█"),
+            )?;
+        }
 
         for row in 0..CELLS_PER_COL {
             for col in 0..CELLS_PER_ROW {
                 draw_cell(
-                    x + col as u16 * CELL_WIDTH,
-                    y + row as u16 * CELL_HEIGHT + 1,
-                    row * CELLS_PER_ROW + col,
+                    x + col * CELL_WIDTH,
+                    y + row * CELL_HEIGHT + 1,
+                    (row * CELLS_PER_ROW + col) as u8,
                 )?;
             }
         }
 
+        for oy in 1..(CELLS_PER_ROW * CELL_HEIGHT) {
+            queue!(
+                stdout,
+                cursor::MoveTo(x + TOTAL_WIDTH, y + oy),
+                style::SetForegroundColor(Color::Black),
+                style::Print("█"),
+            )?;
+        }
+
         queue!(
             stdout,
-            cursor::MoveTo(x, 1 + y + 2 * CELL_HEIGHT),
+            cursor::MoveTo(x - 1, size.1 - 7),
             style::SetForegroundColor(Color::Black),
-            style::Print("🬂".repeat(TOTAL_WIDTH as usize)),
-            style::ResetColor
+            style::Print("🬭".repeat(TOTAL_WIDTH as usize + 2)),
+        )?;
+
+        // arrows
+        let ax = x + TOTAL_WIDTH + 3;
+        let ay = size.1 - 5;
+        queue!(
+            stdout,
+            cursor::MoveTo(ax, ay + 1),
+            style::Print("▀▄"),
+            cursor::MoveTo(ax, ay + 2),
+            style::Print(" ▄▀"),
+            cursor::MoveTo(ax, ay + 3),
+            style::Print("▀"),
+        )?;
+
+        let ax = x - 6;
+        let ay = size.1 - 5;
+        queue!(
+            stdout,
+            cursor::MoveTo(ax, ay + 1),
+            style::Print(" ▄▀"),
+            cursor::MoveTo(ax, ay + 2),
+            style::Print("▀▄  "),
+            cursor::MoveTo(ax, ay + 3),
+            style::Print("  ▀"),
+            style::ResetColor,
         )?;
 
         Ok(())
@@ -164,7 +306,7 @@ struct Board {
     x: i16,
     y: i16,
 
-    pixels: [[Pixel; 75]; 75],
+    pixels: [[Pixel; BOARD_WIDTH]; BOARD_HEIGHT],
     palette: Palette,
 }
 
@@ -177,7 +319,7 @@ impl Board {
             pixels: [[Pixel {
                 color: 0,
                 filled: false,
-            }; 75]; 75],
+            }; BOARD_WIDTH]; BOARD_HEIGHT],
             palette: Palette::new(),
         }
     }
@@ -207,34 +349,32 @@ impl Board {
     }
 
     fn render(&self) -> io::Result<()> {
-        let mut stdout = io::stdout();
         let size = terminal::size()?;
+
+        let mut first_cx: Option<u16> = None;
 
         for px in 0..self.width() {
             for py in 0..self.height() {
-                let cx = self.x + 2 * px as i16;
-                let cy = self.y + py as i16;
+                let cx = self.x + 6 * px as i16;
+                let cy = self.y + 3 * py as i16;
 
-                if cx < 0 || cx + 1 >= size.0 as i16 || cy < 0 || cy >= size.1 as i16 {
+                if cx < 0 || cx + 6 >= size.0 as i16 || cy < 0 || cy + 2 >= size.1 as i16 {
                     continue;
                 }
 
-                queue!(stdout, cursor::MoveTo(cx as u16, cy as u16))?;
+                let cx = cx as u16;
+                let cy = cy as u16;
+
+                if first_cx.is_none() {
+                    first_cx = Some(cx);
+                }
 
                 let pixel = self.get(px, py);
+                let is_first_col = first_cx.unwrap() == cx;
                 if pixel.filled {
-                    queue!(
-                        stdout,
-                        style::SetBackgroundColor(self.palette.get_color(pixel.color)),
-                        style::Print("  "),
-                        style::ResetColor
-                    )?;
+                    render_filled_board_cell(cx, cy, self.palette.get_color(pixel.color))?;
                 } else {
-                    if px % 2 == 1 {
-                        queue!(stdout, style::Print(to_subscript(pixel.color + 1)))?;
-                    } else {
-                        queue!(stdout, style::Print(to_superscript(pixel.color + 1)))?;
-                    }
+                    render_board_cell(cx, cy, pixel.color, is_first_col)?;
                 }
             }
         }
@@ -297,6 +437,8 @@ fn main() -> io::Result<()> {
     let mut current_color: u8 = 0;
     let mut drag_start = (0, 0);
 
+    let mut p = (0, 0);
+
     let mut quit = false;
     while !quit {
         let start = std::time::Instant::now();
@@ -314,13 +456,14 @@ fn main() -> io::Result<()> {
                 Event::Mouse(event) => match event.kind {
                     MouseEventKind::Drag(MouseButton::Left)
                     | MouseEventKind::Down(MouseButton::Left) => {
-                        let px = (event.column as i16 - board.x) / 2;
-                        let py = event.row as i16 - board.y;
+                        let px = (event.column as i16 - board.x) / 6;
+                        let py = (event.row as i16 - board.y) / 3;
 
                         if !board.contains(px, py) {
                             continue;
                         }
 
+                        p = (px, py);
                         let pixel = board.get_mut(px as u16, py as u16);
                         if pixel.color == current_color {
                             pixel.filled = true;
@@ -357,8 +500,12 @@ fn main() -> io::Result<()> {
             stdout,
             cursor::MoveTo(0, 0),
             style::Print(format!(
-                "::: bx: {}, by: {} ::: c: {} :::",
-                board.x, board.y, current_color
+                "::: bx: {}, by: {} ::: c: {} ::: px: {}, py: {} :::",
+                board.x,
+                board.y,
+                current_color + 1,
+                p.0,
+                p.1
             )),
             terminal::EndSynchronizedUpdate
         )?;
