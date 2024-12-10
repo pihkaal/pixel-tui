@@ -1,11 +1,8 @@
 use std::io;
 
-use crossterm::terminal;
+use crossterm::{cursor, event::MouseButton, queue, style, terminal};
 
-use crate::{
-    palette::Palette,
-    rendering::{render_board_cell, render_filled_board_cell},
-};
+use crate::{input::Input, palette::Palette};
 
 const BOARD_WIDTH: usize = 10;
 const BOARD_HEIGHT: usize = 10;
@@ -24,7 +21,22 @@ pub struct Board {
     pub palette: Palette,
 }
 
+const CELL_NUMBERS: [&str; 9] = [
+    "\u{31}\u{FE0F}",
+    "\u{32}\u{FE0F}",
+    "\u{33}\u{FE0F}",
+    "\u{34}\u{FE0F}",
+    "\u{35}\u{FE0F}",
+    "\u{36}\u{FE0F}",
+    "\u{37}\u{FE0F}",
+    "\u{38}\u{FE0F}",
+    "\u{39}\u{FE0F}",
+];
+
 impl Board {
+    pub const CELL_WIDTH: u16 = 2;
+    pub const CELL_HEIGHT: u16 = 1;
+
     pub fn new() -> Self {
         Self {
             x: 0,
@@ -50,10 +62,6 @@ impl Board {
         self.pixels[py as usize][px as usize]
     }
 
-    pub fn get_mut(&mut self, px: u16, py: u16) -> &mut Pixel {
-        &mut self.pixels[py as usize][px as usize]
-    }
-
     pub fn set(&mut self, px: u16, py: u16, pixel: Pixel) {
         self.pixels[py as usize][px as usize] = pixel;
     }
@@ -62,17 +70,51 @@ impl Board {
         px >= 0 && px < self.width() as i16 && py >= 0 && py < self.height() as i16
     }
 
+    pub fn update(&mut self, input: &Input) -> io::Result<()> {
+        self.palette.update(input)?;
+
+        if let Some(mouse_drag) = &input.mouse_drag {
+            if mouse_drag.button == MouseButton::Middle {
+                self.x += mouse_drag.offset_x as i16;
+                self.y += mouse_drag.offset_y as i16;
+            }
+        }
+
+        for frame_mouse in &input.frame_mouses {
+            if frame_mouse.active_button != Some(MouseButton::Left) {
+                continue;
+            }
+
+            let px = (frame_mouse.x as i16 - self.x) / Self::CELL_WIDTH as i16;
+            let py = (frame_mouse.y as i16 - self.y) / Self::CELL_HEIGHT as i16;
+
+            if self.contains(px, py) {
+                let pixel = &mut self.pixels[py as usize][px as usize];
+                if pixel.color == self.palette.selected_color {
+                    pixel.filled = true;
+                }
+            }
+        }
+
+        Ok(())
+    }
+
     pub fn render(&self) -> io::Result<()> {
         let size = terminal::size()?;
 
         let mut first_cx: Option<u16> = None;
 
+        // TODO: intersect board rect with terminal rect
         for px in 0..self.width() {
             for py in 0..self.height() {
-                let cx = self.x + 6 * px as i16;
-                let cy = self.y + 3 * py as i16;
+                let cx = self.x + Self::CELL_WIDTH as i16 * px as i16;
+                let cy = self.y + Self::CELL_HEIGHT as i16 * py as i16;
 
-                if cx < 0 || cx + 6 >= size.0 as i16 || cy < 0 || cy + 2 >= size.1 as i16 {
+                if cx < 0
+                    || cx + Self::CELL_WIDTH as i16 >= size.0 as i16
+                    || cy < 0
+                    || cy + Self::CELL_HEIGHT as i16 - 1 >= size.1 as i16
+                {
                     continue;
                 }
 
@@ -84,11 +126,22 @@ impl Board {
                 }
 
                 let pixel = self.get(px, py);
-                let is_first_col = first_cx.unwrap() == cx;
+                let mut stdout = io::stdout();
+
                 if pixel.filled {
-                    render_filled_board_cell(cx, cy, self.palette.get_color(pixel.color))?;
+                    queue!(
+                        stdout,
+                        cursor::MoveTo(cx, cy),
+                        style::SetBackgroundColor(self.palette.get_color(pixel.color)),
+                        style::Print("  "),
+                        style::ResetColor
+                    )?;
                 } else {
-                    render_board_cell(cx, cy, pixel.color, is_first_col)?;
+                    queue!(
+                        stdout,
+                        cursor::MoveTo(cx, cy),
+                        style::Print(CELL_NUMBERS[pixel.color as usize]),
+                    )?;
                 }
             }
         }

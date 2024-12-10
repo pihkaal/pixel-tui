@@ -5,41 +5,6 @@ use crossterm::{
     style::{self, Color},
 };
 
-// TODO: allow to render outside of the screen
-pub fn render_filled_board_cell(x: u16, y: u16, color: Color) -> io::Result<()> {
-    let mut stdout = io::stdout();
-
-    queue!(
-        stdout,
-        cursor::MoveTo(x, y),
-        style::SetBackgroundColor(color),
-        style::Print("      "),
-        cursor::MoveTo(x, y + 1),
-        style::Print("      "),
-        cursor::MoveTo(x, y + 2),
-        style::Print("      "),
-        style::ResetColor
-    )?;
-
-    Ok(())
-}
-
-pub fn render_board_cell(x: u16, y: u16, number: u8, first_col: bool) -> io::Result<()> {
-    render_cell(
-        x,
-        y,
-        Color::Rgb {
-            r: 143,
-            g: 149,
-            b: 170,
-        },
-        Color::White,
-        None,
-        number,
-        first_col,
-    )
-}
-
 pub fn render_cell(
     x: u16,
     y: u16,

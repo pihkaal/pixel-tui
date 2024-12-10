@@ -1,15 +1,22 @@
 use std::io;
 
 use crossterm::{
-    cursor, queue,
+    cursor,
+    event::MouseButton,
+    queue,
     style::{self, Color},
     terminal,
 };
 
-use crate::rendering::render_cell;
+use crate::{
+    input::{Input, Rect},
+    rendering::render_cell,
+};
 
 pub struct Palette {
     colors: [RGB; 20],
+
+    pub selected_color: u8,
 }
 
 pub struct RGB {
@@ -57,6 +64,7 @@ impl Palette {
                 RGB::new(50, 200, 50),
                 RGB::new(255, 165, 0),
             ],
+            selected_color: 0,
         }
     }
 
@@ -64,8 +72,34 @@ impl Palette {
         self.colors[index as usize].to_color()
     }
 
-    pub fn count(&self) -> u8 {
-        self.colors.len() as u8
+    pub fn update(&mut self, input: &Input) -> io::Result<()> {
+        const CELL_WIDTH: u16 = 6;
+        const CELL_HEIGHT: u16 = 3;
+        const CELLS_PER_ROW: u16 = 5;
+        const CELLS_PER_COL: u16 = 2;
+        const TOTAL_WIDTH: u16 = CELL_WIDTH * CELLS_PER_ROW as u16;
+
+        let size = terminal::size()?;
+        let x = (size.0 - TOTAL_WIDTH) / 2;
+        let y = size.1 - 2 * CELL_HEIGHT - 1;
+
+        for row in 0..CELLS_PER_COL {
+            for col in 0..CELLS_PER_ROW {
+                if input.is_mouse_button_down_in(
+                    MouseButton::Left,
+                    Rect {
+                        x: (x + col * CELL_WIDTH) as i16,
+                        y: (y + row * CELL_HEIGHT + 1) as i16,
+                        width: CELL_WIDTH,
+                        height: CELL_HEIGHT,
+                    },
+                ) {
+                    self.selected_color = (row * CELLS_PER_ROW + col) as u8;
+                }
+            }
+        }
+
+        Ok(())
     }
 
     pub fn render(&self) -> io::Result<()> {

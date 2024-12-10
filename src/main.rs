@@ -6,16 +6,20 @@ use std::{
 
 use crossterm::{
     cursor,
-    event::{self, Event, KeyCode, MouseButton, MouseEventKind},
-    execute, queue, style,
+    event::{self, KeyCode, KeyboardEnhancementFlags},
+    execute, queue,
     terminal::{self, ClearType},
 };
 
 use rand;
 
-use crate::board::{Board, Pixel};
+use crate::{
+    board::{Board, Pixel},
+    input::Input,
+};
 
 mod board;
+mod input;
 mod palette;
 mod rendering;
 
@@ -29,6 +33,7 @@ fn main() -> io::Result<()> {
         stdout,
         terminal::EnterAlternateScreen,
         event::EnableMouseCapture,
+        event::PushKeyboardEnhancementFlags(KeyboardEnhancementFlags::REPORT_EVENT_TYPES),
         cursor::Hide
     )?;
 
@@ -37,7 +42,7 @@ fn main() -> io::Result<()> {
     // randomize board
     for row in 0..board.height() {
         for col in 0..board.width() {
-            let random_color = rand::random::<u8>() % board.palette.count();
+            let random_color = rand::random::<u8>() % 9;
             board.set(
                 col,
                 row,
@@ -49,57 +54,21 @@ fn main() -> io::Result<()> {
         }
     }
 
-    let mut current_color: u8 = 0;
-    let mut drag_start = (0, 0);
-
-    let mut p = (0, 0);
+    let mut input = Input::new();
 
     let mut quit = false;
     while !quit {
         let start = std::time::Instant::now();
 
-        // update
-        while event::poll(Duration::ZERO)? {
-            match event::read()? {
-                Event::Key(event) => match event.code {
-                    KeyCode::Char('q') => {
-                        quit = true;
-                        break;
-                    }
-                    _ => {}
-                },
-                Event::Mouse(event) => match event.kind {
-                    MouseEventKind::Drag(MouseButton::Left)
-                    | MouseEventKind::Down(MouseButton::Left) => {
-                        let px = (event.column as i16 - board.x) / 6;
-                        let py = (event.row as i16 - board.y) / 3;
+        // begin update
+        input.process_events()?;
 
-                        if !board.contains(px, py) {
-                            continue;
-                        }
-
-                        p = (px, py);
-                        let pixel = board.get_mut(px as u16, py as u16);
-                        if pixel.color == current_color {
-                            pixel.filled = true;
-                        }
-                    }
-                    MouseEventKind::Down(MouseButton::Right) => {
-                        current_color = (current_color + 1) % board.palette.count();
-                    }
-                    MouseEventKind::Down(MouseButton::Middle) => {
-                        drag_start = (event.column, event.row);
-                    }
-                    MouseEventKind::Drag(MouseButton::Middle) => {
-                        board.x += event.column as i16 - drag_start.0 as i16;
-                        board.y += event.row as i16 - drag_start.1 as i16;
-                        drag_start = (event.column, event.row);
-                    }
-                    _ => {}
-                },
-                _ => {}
-            }
+        if input.is_key_down(KeyCode::Char('q')) {
+            quit = true;
         }
+
+        board.update(&input)?;
+        // end update
 
         // render
         queue!(
@@ -111,21 +80,9 @@ fn main() -> io::Result<()> {
         board.render()?;
         board.palette.render()?;
 
-        queue!(
-            stdout,
-            cursor::MoveTo(0, 0),
-            style::Print(format!(
-                "::: bx: {}, by: {} ::: c: {} ::: px: {}, py: {} :::",
-                board.x,
-                board.y,
-                current_color + 1,
-                p.0,
-                p.1
-            )),
-            terminal::EndSynchronizedUpdate
-        )?;
-
+        queue!(stdout, terminal::EndSynchronizedUpdate)?;
         stdout.flush()?;
+        // end render
 
         let elapsed = start.elapsed();
         if elapsed < Duration::from_millis(1000 / FPS) {
@@ -136,6 +93,7 @@ fn main() -> io::Result<()> {
     execute!(
         stdout,
         event::DisableMouseCapture,
+        event::PopKeyboardEnhancementFlags,
         terminal::LeaveAlternateScreen,
         cursor::Show
     )?;
