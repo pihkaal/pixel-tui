@@ -9,20 +9,30 @@ use crossterm::{
 };
 
 use crate::{
+    board::BoardDataColor,
     input::{Input, Rect},
-    rendering::render_cell,
 };
 
+#[derive(Clone, Copy)]
+pub struct PaletteColor {
+    r: u8,
+    g: u8,
+    b: u8,
+    pub painted: u32,
+    count: u32,
+}
+
 pub struct Palette {
-    colors: [RGB; 20],
+    pub colors: Vec<PaletteColor>,
 
     pub selected_color: u8,
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
 pub struct RGB {
-    r: u8,
-    g: u8,
-    b: u8,
+    pub r: u8,
+    pub g: u8,
+    pub b: u8,
 }
 
 impl RGB {
@@ -39,37 +49,35 @@ impl RGB {
     }
 }
 
+impl From<PaletteColor> for Color {
+    fn from(color: PaletteColor) -> Self {
+        Color::Rgb {
+            r: color.r,
+            g: color.g,
+            b: color.b,
+        }
+    }
+}
+
 impl Palette {
-    pub fn new() -> Self {
+    pub fn new(colors: Vec<BoardDataColor>) -> Self {
         Self {
-            colors: [
-                RGB::new(3, 104, 63),
-                RGB::new(37, 19, 190),
-                RGB::new(242, 55, 94),
-                RGB::new(123, 223, 67),
-                RGB::new(45, 78, 205),
-                RGB::new(200, 120, 14),
-                RGB::new(75, 192, 203),
-                RGB::new(145, 20, 145),
-                RGB::new(56, 34, 89),
-                RGB::new(244, 67, 54),
-                RGB::new(77, 99, 232),
-                RGB::new(188, 65, 101),
-                RGB::new(96, 231, 79),
-                RGB::new(222, 190, 75),
-                RGB::new(105, 135, 90),
-                RGB::new(10, 220, 182),
-                RGB::new(200, 40, 60),
-                RGB::new(90, 24, 180),
-                RGB::new(50, 200, 50),
-                RGB::new(255, 165, 0),
-            ],
+            colors: colors
+                .iter()
+                .map(|c| PaletteColor {
+                    r: c.rgb.r,
+                    g: c.rgb.g,
+                    b: c.rgb.b,
+                    painted: 0,
+                    count: c.count,
+                })
+                .collect::<Vec<_>>(),
             selected_color: 0,
         }
     }
 
     pub fn get_color(&self, index: u8) -> Color {
-        self.colors[index as usize].to_color()
+        self.colors[index as usize].into()
     }
 
     pub fn update(&mut self, input: &Input) -> io::Result<()> {
@@ -102,39 +110,103 @@ impl Palette {
         Ok(())
     }
 
+    fn render_cell(&self, x: u16, y: u16, color_index: u8) -> io::Result<()> {
+        const BORDER_COLOR: Color = Color::Black;
+        let color = self.colors[color_index as usize];
+        let brightness =
+            (0.299 * color.r as f32 + 0.587 * color.g as f32 + 0.114 * color.b as f32) / 255.0;
+
+        let mut stdout = io::stdout();
+
+        let background_color = color.into();
+        let (zero_foreground_color, foreground_color) = if brightness > 0.5 {
+            (
+                RGB::new(25, 25, 25).to_color(),
+                RGB::new(0, 0, 0).to_color(),
+            )
+        } else {
+            (
+                RGB::new(229, 229, 229).to_color(),
+                RGB::new(255, 255, 255).to_color(),
+            )
+        };
+
+        queue!(
+            stdout,
+            cursor::MoveTo(x, y),
+            style::SetBackgroundColor(background_color),
+            style::SetForegroundColor(BORDER_COLOR),
+            style::Print("🭽▔▔▔▔🭾"),
+            cursor::MoveTo(x, y + 1),
+            style::Print("▏ "),
+        )?;
+
+        if color_index < 9 {
+            queue!(
+                stdout,
+                style::SetForegroundColor(zero_foreground_color),
+                style::Print("0"),
+                style::SetForegroundColor(foreground_color),
+                style::Print(format!("{}", color_index + 1)),
+            )?;
+        } else {
+            queue!(
+                stdout,
+                style::SetForegroundColor(foreground_color),
+                style::Print(format!("{}", color_index + 1)),
+            )?;
+        }
+
+        queue!(
+            stdout,
+            style::SetForegroundColor(BORDER_COLOR),
+            style::Print(" ▕"),
+            cursor::MoveTo(x, y + 2),
+            style::Print("🭼▁▁▁▁🭿"),
+            style::ResetColor,
+            //
+            style::SetForegroundColor(BORDER_COLOR),
+            cursor::MoveTo(x + 6, y),
+            style::Print("▏"),
+            cursor::MoveTo(x + 6, y + 1),
+            style::Print("▏"),
+            cursor::MoveTo(x + 6, y + 2),
+            style::Print("▏"),
+        )?;
+
+        if self.selected_color == color_index {
+            let fill = (6.0 * color.painted as f32 / color.count as f32).round() as usize;
+            // i'm too tired do this properly, at least it works for now
+            let fill = if fill == 0 {
+                0
+            } else if fill == 1 {
+                1
+            } else if fill == 2 || fill == 3 {
+                2
+            } else if fill == 4 || fill == 5 {
+                3
+            } else {
+                4
+            };
+
+            queue!(
+                stdout,
+                cursor::MoveTo(x + 1, y + 2),
+                style::SetBackgroundColor(background_color),
+                style::Print("\u{ee00}\u{ee01}\u{ee01}\u{ee02}"),
+                cursor::MoveTo(x + 1, y + 2),
+                style::Print(&"\u{ee03}\u{ee04}\u{ee04}\u{ee05}"[0..fill * 3]),
+            )?;
+        }
+
+        queue!(stdout, style::ResetColor)?;
+
+        Ok(())
+    }
+
     pub fn render(&self) -> io::Result<()> {
         let mut stdout = io::stdout();
         let size = terminal::size()?;
-
-        let draw_cell = |x: u16, y: u16, color_index: u8| -> io::Result<()> {
-            let color = &self.colors[color_index as usize];
-            let brightness =
-                (0.299 * color.r as f32 + 0.587 * color.g as f32 + 0.114 * color.b as f32) / 255.0;
-
-            if brightness > 0.5 {
-                render_cell(
-                    x,
-                    y,
-                    RGB::new(25, 25, 25).to_color(),
-                    RGB::new(0, 0, 0).to_color(),
-                    Some(color.to_color()),
-                    color_index,
-                    false,
-                )?;
-            } else {
-                render_cell(
-                    x,
-                    y,
-                    RGB::new(229, 229, 229).to_color(),
-                    RGB::new(255, 255, 255).to_color(),
-                    Some(color.to_color()),
-                    color_index,
-                    false,
-                )?;
-            }
-
-            Ok(())
-        };
 
         const CELL_WIDTH: u16 = 6;
         const CELL_HEIGHT: u16 = 3;
@@ -156,11 +228,19 @@ impl Palette {
 
         for row in 0..CELLS_PER_COL {
             for col in 0..CELLS_PER_ROW {
+                /*
                 draw_cell(
                     x + col * CELL_WIDTH,
                     y + row * CELL_HEIGHT + 1,
                     (row * CELLS_PER_ROW + col) as u8,
                 )?;
+                */
+                let color_index = (row * CELLS_PER_ROW + col) as u8;
+                if color_index as usize >= self.colors.len() {
+                    break;
+                }
+
+                self.render_cell(x + col * CELL_WIDTH, y + row * CELL_HEIGHT + 1, color_index)?;
             }
         }
 

@@ -4,6 +4,7 @@ use std::{
     time::Duration,
 };
 
+use board::BoardData;
 use crossterm::{
     cursor,
     event::{self, KeyCode, KeyboardEnhancementFlags},
@@ -11,17 +12,11 @@ use crossterm::{
     terminal::{self, ClearType},
 };
 
-use rand;
-
-use crate::{
-    board::{Board, Pixel},
-    input::Input,
-};
+use crate::{board::Board, input::Input};
 
 mod board;
 mod input;
 mod palette;
-mod rendering;
 
 const FPS: u64 = 60;
 
@@ -37,22 +32,8 @@ fn main() -> io::Result<()> {
         cursor::Hide
     )?;
 
-    let mut board = Board::new();
-
-    // randomize board
-    for row in 0..board.height() {
-        for col in 0..board.width() {
-            let random_color = rand::random::<u8>() % 9;
-            board.set(
-                col,
-                row,
-                Pixel {
-                    color: random_color,
-                    filled: false,
-                },
-            );
-        }
-    }
+    let board_data = BoardData::from_ppm_file("images/test.ppm")?;
+    let mut board = Board::new(board_data);
 
     let mut input = Input::new();
 
