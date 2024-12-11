@@ -4,7 +4,7 @@ use crossterm::{
     cursor,
     event::MouseButton,
     queue,
-    style::{self, Color},
+    style::{self, Attribute, Color},
     terminal,
 };
 
@@ -141,24 +141,36 @@ impl Palette {
             style::Print("▏ "),
         )?;
 
-        if color_index < 9 {
+        if color_index == self.selected_color {
+            queue!(stdout, style::SetAttribute(Attribute::Bold))?;
+        }
+        if color.painted == color.count {
             queue!(
                 stdout,
                 style::SetForegroundColor(zero_foreground_color),
-                style::Print("0"),
-                style::SetForegroundColor(foreground_color),
-                style::Print(format!("{}", color_index + 1)),
+                style::Print("OK")
             )?;
         } else {
-            queue!(
-                stdout,
-                style::SetForegroundColor(foreground_color),
-                style::Print(format!("{}", color_index + 1)),
-            )?;
+            if color_index < 9 {
+                queue!(
+                    stdout,
+                    style::SetForegroundColor(zero_foreground_color),
+                    style::Print("0"),
+                    style::SetForegroundColor(foreground_color),
+                    style::Print(format!("{}", color_index + 1)),
+                )?;
+            } else {
+                queue!(
+                    stdout,
+                    style::SetForegroundColor(foreground_color),
+                    style::Print(format!("{}", color_index + 1)),
+                )?;
+            }
         }
 
         queue!(
             stdout,
+            style::SetAttribute(Attribute::NormalIntensity),
             style::SetForegroundColor(BORDER_COLOR),
             style::Print(" ▕"),
             cursor::MoveTo(x, y + 2),
@@ -174,7 +186,7 @@ impl Palette {
             style::Print("▏"),
         )?;
 
-        if self.selected_color == color_index {
+        if color.painted != color.count && self.selected_color == color_index {
             let fill = (6.0 * color.painted as f32 / color.count as f32).round() as usize;
             // i'm too tired do this properly, at least it works for now
             let fill = if fill == 0 {
